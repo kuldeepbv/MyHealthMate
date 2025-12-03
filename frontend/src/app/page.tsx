@@ -1,32 +1,35 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
 export default function Home() {
-  const [status, setStatus] = useState("Checking backend...");
-
-  useEffect(() => {
-    fetch("http://127.0.0.1:8000/health")
-      .then((res) => res.json())
-      .then((data) => {
-        setStatus(data.message ?? "Backend is up");
-      })
-      .catch((err) => {
-        console.error("Error calling backend:", err);
-        setStatus("❌ Could not reach backend");
-      });
-  }, []);
-
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
-      <div className="p-6 rounded-2xl bg-slate-900 shadow-lg border border-slate-800 max-w-md w-full">
-        <h1 className="text-2xl font-bold mb-4 text-center">
-          MyHealthMate
-        </h1>
-        <p className="text-slate-300 text-center">
-          Backend status:{" "}
-          <span className="font-semibold">{status}</span>
+      <div className="max-w-xl w-full px-4">
+        <h1 className="text-3xl font-bold mb-2 text-center">MyHealthMate</h1>
+        <p className="text-slate-400 mb-8 text-center">
+          Choose what you want to track today.
         </p>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <a
+            href="/health"
+            className="block bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-2xl p-5 shadow-lg transition-colors"
+          >
+            <h2 className="text-xl font-semibold mb-2">Health Logs</h2>
+            <p className="text-sm text-slate-400">
+              Track sleep, water, steps, mood, and weight for each day.
+            </p>
+          </a>
+
+          <a
+            href="/meals"
+            className="block bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-2xl p-5 shadow-lg transition-colors"
+          >
+            <h2 className="text-xl font-semibold mb-2">Meal Logs</h2>
+            <p className="text-sm text-slate-400">
+              Log your meals, calories, macros, and notes for each day.
+            </p>
+          </a>
+        </div>
       </div>
     </main>
   );
