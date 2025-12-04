@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { account } from "@/lib/appwrite";
 
 const BACKEND_URL = "http://127.0.0.1:8000";
 
@@ -11,83 +12,141 @@ type CoachResponse = {
 };
 
 export default function CoachPage() {
-  const [loading, setLoading] = useState(false);
-  const [coachData, setCoachData] = useState<CoachResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // ---------- 1) Auth state ----------
+  const [userId, setUserId] = useState<string | null>(null);
+  const [checkingUser, setCheckingUser] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
 
+  // ---------- 2) Coach state ----------
+  const [loading, setLoading] = useState(false);
+  const [coachError, setCoachError] = useState<string | null>(null);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [healthCount, setHealthCount] = useState<number | null>(null);
+  const [mealCount, setMealCount] = useState<number | null>(null);
+
+  // ---------- 3) Check current user once ----------
+  useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const user = await account.get();
+        setUserId(user.$id);
+      } catch (err: any) {
+        console.error(err);
+        setAuthError("You are not logged in. Redirecting to login...");
+        setTimeout(() => {
+          window.location.href = "/auth";
+        }, 1000);
+      } finally {
+        setCheckingUser(false);
+      }
+    };
+
+    fetchUser();
+  }, []);
+
+  // ---------- 4) Trigger coach summary ----------
   const handleGenerate = async () => {
+    if (!userId) return;
+
     setLoading(true);
-    setError(null);
-    setCoachData(null);
+    setCoachError(null);
+    setSummary(null);
+    setHealthCount(null);
+    setMealCount(null);
 
     try {
-      const res = await fetch(`${BACKEND_URL}/coach/summary`);
+      const res = await fetch(
+        `${BACKEND_URL}/coach/summary?user_id=${encodeURIComponent(userId)}`
+      );
       if (!res.ok) {
         throw new Error(`Request failed with status ${res.status}`);
       }
       const data: CoachResponse = await res.json();
-      setCoachData(data);
-    } catch (err) {
+      setSummary(data.summary);
+      setHealthCount(data.health_logs_count);
+      setMealCount(data.meal_logs_count);
+    } catch (err: any) {
       console.error(err);
-      setError("Failed to fetch coach summary. Please try again.");
+      setCoachError(
+        err?.message || "Failed to generate your weekly health summary."
+      );
     } finally {
       setLoading(false);
     }
   };
 
+  // ---------- 5) Conditional renders ----------
+  if (checkingUser) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
+        <p className="text-sm text-slate-400">Checking login status...</p>
+      </main>
+    );
+  }
+
+  if (!userId) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
+        <p className="text-sm text-slate-400">
+          {authError || "You are not logged in."}
+        </p>
+      </main>
+    );
+  }
+
+  // ---------- 6) Main UI ----------
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="max-w-4xl mx-auto px-4 py-8">
-        <h1 className="text-3xl font-bold mb-3">AI Health & Meal Coach</h1>
-        <p className="text-slate-400 mb-6 text-sm">
-          The coach looks at your last 7 days of health and meal logs and gives
-          you a friendly summary plus practical suggestions.
+      <div className="max-w-3xl mx-auto px-4 py-8">
+        <h1 className="text-2xl font-bold mb-3">AI Health Coach</h1>
+        <p className="text-xs text-slate-500 mb-4">
+          Logged in as <span className="font-mono">{userId}</span>
         </p>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-md mb-6">
+        <section className="bg-slate-900 border border-slate-800 rounded-2xl p-4 mb-4">
+          <p className="text-sm text-slate-300 mb-3">
+            This will look at your last 7 days of{" "}
+            <span className="font-semibold">health logs</span> and{" "}
+            <span className="font-semibold">meal logs</span>, then generate a
+            short, friendly summary with a few practical suggestions.
+          </p>
+
           <button
             onClick={handleGenerate}
             disabled={loading}
-            className="bg-sky-600 hover:bg-sky-500 disabled:bg-sky-900 text-sm font-semibold py-2.5 px-4 rounded-lg transition-colors"
+            className="inline-flex items-center px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:bg-sky-900 text-sm font-semibold transition-colors"
           >
-            {loading ? "Analyzing your last 7 days..." : "Generate my weekly summary"}
+            {loading ? "Analyzing your week..." : "Generate my weekly summary"}
           </button>
 
-          {error && (
-            <p className="mt-3 text-sm text-red-400">
-              {error}
-            </p>
+          {coachError && (
+            <p className="text-xs text-red-400 mt-3">{coachError}</p>
           )}
 
-          {coachData && (
-            <div className="mt-5 space-y-3 text-sm">
-              <p className="text-slate-400">
-                Using{" "}
-                <span className="font-mono">
-                  {coachData.health_logs_count} health logs
-                </span>{" "}
-                and{" "}
-                <span className="font-mono">
-                  {coachData.meal_logs_count} meal logs
-                </span>{" "}
-                from the last 7 days.
-              </p>
+          {healthCount !== null && mealCount !== null && (
+            <p className="text-[11px] text-slate-500 mt-3">
+              Used {healthCount} health logs and {mealCount} meal logs from the
+              last 7 days.
+            </p>
+          )}
+        </section>
 
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 max-h-[420px] overflow-y-auto">
-                <pre className="whitespace-pre-wrap text-slate-100 text-sm leading-relaxed">
-                  {coachData.summary}
-                </pre>
-              </div>
+        <section className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <h2 className="text-sm font-semibold mb-2 text-slate-200">
+            Your weekly summary
+          </h2>
+          {!summary && !loading && (
+            <p className="text-xs text-slate-500">
+              No summary yet. Click the button above to generate insights based
+              on your recent data.
+            </p>
+          )}
+          {summary && (
+            <div className="text-sm text-slate-200 whitespace-pre-line">
+              {summary}
             </div>
           )}
-
-          {!coachData && !loading && !error && (
-            <p className="mt-3 text-sm text-slate-500">
-              Click the button above once you&apos;ve logged a few days of health
-              and meals.
-            </p>
-          )}
-        </div>
+        </section>
       </div>
     </main>
   );

@@ -4,6 +4,8 @@ from typing import List
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from pydantic import BaseModel
+
 from app.ai import generate_coach_summary
 
 from app.db import supabase
@@ -28,6 +30,28 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+class HealthLogCreate(BaseModel):
+    log_date: date
+    sleep_hours: float
+    water_glasses: int
+    mood_score: int
+    steps: int
+    weight: float
+    notes: str | None = None
+    user_id: str  # NEW
+
+class MealLogCreate(BaseModel):
+    log_date: date
+    meal_type: str
+    meal_name: str
+    calories: float | None = None
+    protein_grams: float | None = None
+    carbs_grams: float | None = None
+    fat_grams: float | None = None
+    notes: str | None = None
+    user_id: str  # NEW
+
 
 @app.get("/health")
 def health_check():
@@ -60,30 +84,28 @@ def debug_add_health_log():
 
 @app.post("/health-logs", response_model=HealthLog)
 def create_health_log(payload: HealthLogCreate):
-    user_id = "test-user-1"
-
-    # Turn Pydantic model into dict
-    data = payload.dict()
-
-    # Convert date object → string "YYYY-MM-DD"
-    if isinstance(data["log_date"], date):
-        data["log_date"] = data["log_date"].isoformat()
-
-    row = {
-        "user_id": user_id,
-        **data,
-    }
+    user_id = payload.user_id  # from frontend
+    date_str = payload.log_date.isoformat()
 
     result = (
         supabase.table("health_logs")
-        .insert(row)
+        .insert(
+            {
+                "user_id": user_id,
+                "log_date": date_str,
+                "sleep_hours": payload.sleep_hours,
+                "water_glasses": payload.water_glasses,
+                "mood_score": payload.mood_score,
+                "steps": payload.steps,
+                "weight": payload.weight,
+                "notes": payload.notes,
+            }
+        )
         .execute()
     )
 
-    if not result.data:
-        raise HTTPException(status_code=500, detail="Failed to insert health log")
-
     return result.data[0]
+
 
 @app.get("/health-logs/today", response_model=List[HealthLog])
 def get_today_health_logs():
@@ -136,12 +158,10 @@ def get_all_health_logs():
     return result.data or []
 
 @app.get("/health-logs/by-date", response_model=List[HealthLog])
-def get_health_logs_by_date(log_date: date = Query(..., description="YYYY-MM-DD")):
-    """
-    Return health logs for the given date for the current user.
-    The frontend sends the date string (e.g., 2025-12-02), so no timezone issues.
-    """
-    user_id = "test-user-1"
+def get_health_logs_by_date(
+    log_date: date = Query(..., description="YYYY-MM-DD"),
+    user_id: str = Query(..., description="Appwrite user id"),
+):
     date_str = log_date.isoformat()
 
     result = (
@@ -157,31 +177,32 @@ def get_health_logs_by_date(log_date: date = Query(..., description="YYYY-MM-DD"
 
 
 
+
 @app.post("/meal-logs", response_model=MealLog)
 def create_meal_log(payload: MealLogCreate):
-    user_id = "test-user-1"
-
-    data = payload.dict()
-
-    # Convert date → string
-    if isinstance(data["log_date"], date):
-        data["log_date"] = data["log_date"].isoformat()
-
-    row = {
-        "user_id": user_id,
-        **data,
-    }
+    user_id = payload.user_id  # NEW
+    date_str = payload.log_date.isoformat()
 
     result = (
         supabase.table("meal_logs")
-        .insert(row)
+        .insert(
+            {
+                "user_id": user_id,
+                "log_date": date_str,
+                "meal_type": payload.meal_type,
+                "meal_name": payload.meal_name,
+                "calories": payload.calories,
+                "protein_grams": payload.protein_grams,
+                "carbs_grams": payload.carbs_grams,
+                "fat_grams": payload.fat_grams,
+                "notes": payload.notes,
+            }
+        )
         .execute()
     )
 
-    if not result.data:
-        raise HTTPException(status_code=500, detail="Failed to insert meal log")
-
     return result.data[0]
+
 
 @app.get("/meal-logs/today", response_model=List[MealLog])
 def get_today_meals():
@@ -219,8 +240,10 @@ def get_week_meals():
     return result.data or []
 
 @app.get("/meal-logs/by-date", response_model=List[MealLog])
-def get_meals_by_date(log_date: date = Query(..., description="YYYY-MM-DD")):
-    user_id = "test-user-1"
+def get_meals_by_date(
+    log_date: date = Query(..., description="YYYY-MM-DD"),
+    user_id: str = Query(..., description="Appwrite user id"),
+):
     date_str = log_date.isoformat()
 
     result = (
@@ -234,9 +257,11 @@ def get_meals_by_date(log_date: date = Query(..., description="YYYY-MM-DD")):
 
     return result.data or []
 
+
 @app.get("/coach/summary")
-def get_coach_summary():
-    user_id = "test-user-1"
+def get_coach_summary(
+    user_id: str = Query(..., description="Appwrite user id"),
+):
     today = date.today()
     start_date = (today - timedelta(days=6)).isoformat()
     end_date = today.isoformat()
@@ -270,4 +295,5 @@ def get_coach_summary():
         "meal_logs_count": len(meal_logs),
         "summary": summary,
     }
+
 
