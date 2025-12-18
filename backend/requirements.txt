@@ -4,4 +4,4 @@ python-multipart
 pydantic
 python-dotenv
 httpx
-google-generativeai
+google-generativeai==0.5.4
