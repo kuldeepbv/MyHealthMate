@@ -20,7 +20,7 @@ app = FastAPI(title="MyHealthMate API")
 # Allow frontend (Next.js on port 3000)
 origins = [
     "http://localhost:3000",
-    "http://127.0.0.1:3000",
+    "https://my-health-mate-frontend.vercel.app",
 ]
 
 app.add_middleware(
