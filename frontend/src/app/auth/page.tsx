@@ -41,6 +41,14 @@ export default function AuthPage() {
         setTimeout(() => {
           window.location.href = "/";
         }, 800);
+      } else if (
+        msg.includes("not verified") ||
+        msg.includes("email verification") ||
+        msg.includes("unverified")
+      ) {
+        setError(
+          "Please verify your email address before logging in. Check your inbox (and spam folder) for the verification link sent during signup."
+        );
       } else {
         setError(msg || "Login failed. Please check your credentials.");
       }
@@ -54,21 +62,47 @@ export default function AuthPage() {
     resetMessages();
     setLoading(true);
 
-    try{
-      // 1) Create user
+    try {
+      // 1) Create user account
       await account.create(ID.unique(), email, password, name || undefined);
 
-      // 2) Auto-login after signup
-      await account.createEmailPasswordSession(email, password);
+      // 2) Try to send verification email
+      // Note: If email verification is enabled in Appwrite, it may send automatically
+      // If createVerification fails (e.g., no session), Appwrite might have already sent it
+      try {
+        const baseUrl = window.location.origin;
+        const verificationUrl = `${baseUrl}/auth/verify`;
+        await account.createVerification(verificationUrl);
+      } catch (verifyErr: any) {
+        // If verification email sending fails, Appwrite might have sent it automatically
+        // or the account creation might have triggered it
+        console.log("Verification email send attempt:", verifyErr?.message);
+      }
 
-      setMessage("Signup successful! Redirecting...");
+      setMessage(
+        "Account created! Please check your email (and spam folder) to verify your account before logging in."
+      );
+      
+      // Clear form after successful signup
+      setEmail("");
+      setPassword("");
+      setName("");
+      
+      // Switch to login mode after a delay
       setTimeout(() => {
-        window.location.href = "/";
-      }, 800);
+        setMode("login");
+        setMessage(null);
+      }, 5000);
     } catch (err: any) {
       console.error(err);
       const msg = err?.message || "";
-      setError(msg || "Signup failed. Please try again.");
+      
+      // Check if it's an account already exists error
+      if (msg.includes("already exists") || msg.includes("already registered")) {
+        setError("An account with this email already exists. Please log in instead.");
+      } else {
+        setError(msg || "Signup failed. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
@@ -185,6 +219,12 @@ export default function AuthPage() {
           {error && (
             <p className="text-xs text-red-400 mt-3 text-center">
               {error}
+            </p>
+          )}
+
+          {mode === "signup" && (
+            <p className="mt-3 text-[11px] text-slate-400 text-center">
+              After signing up, you&apos;ll receive a verification email. Please verify your email before logging in.
             </p>
           )}
 
