@@ -63,36 +63,124 @@ export default function AuthPage() {
     setLoading(true);
 
     try {
-      // 1) Create user account
+      // Step 1: Create user account
       await account.create(ID.unique(), email, password, name || undefined);
 
-      // 2) Try to send verification email
-      // Note: If email verification is enabled in Appwrite, it may send automatically
-      // If createVerification fails (e.g., no session), Appwrite might have already sent it
+      // Step 2: Attempt to send verification email
+      // Strategy: Try to create a session first. If it succeeds, we can manually send verification email.
+      // If it fails because email is not verified, Appwrite should have sent it automatically.
+      let verificationEmailSent = false;
+      let sessionCreated = false;
+
       try {
-        const baseUrl = window.location.origin;
-        const verificationUrl = `${baseUrl}/auth/verify`;
-        await account.createVerification(verificationUrl);
-      } catch (verifyErr: any) {
-        // If verification email sending fails, Appwrite might have sent it automatically
-        // or the account creation might have triggered it
-        console.log("Verification email send attempt:", verifyErr?.message);
+        // Try to create a session - this will fail if email verification is required and email is unverified
+        await account.createEmailPasswordSession(email, password);
+        sessionCreated = true;
+        
+        // Session was created, which means either:
+        // - Email verification is disabled in Appwrite, OR
+        // - Email was auto-verified (unlikely)
+        // In either case, we should manually send verification email to ensure user verifies
+        console.log("Session created successfully - attempting to send verification email manually");
+        
+        try {
+          const baseUrl = window.location.origin;
+          const verificationUrl = `${baseUrl}/auth/verify`;
+          console.log("Sending verification email to:", email, "with URL:", verificationUrl);
+          
+          await account.createVerification(verificationUrl);
+          console.log("Verification email sent successfully");
+          verificationEmailSent = true;
+          
+          // Delete the session immediately - user needs to verify email first
+          try {
+            await account.deleteSession("current");
+            sessionCreated = false;
+            console.log("Session deleted successfully");
+          } catch (deleteErr: any) {
+            console.warn("Failed to delete session:", deleteErr?.message);
+          }
+        } catch (verifyErr: any) {
+          const verifyMsg = verifyErr?.message || "";
+          console.error("Failed to send verification email:", verifyMsg, verifyErr);
+          
+          // Clean up session if we created one
+          if (sessionCreated) {
+            try {
+              await account.deleteSession("current");
+            } catch (deleteErr) {
+              console.warn("Failed to cleanup session:", deleteErr);
+            }
+          }
+          
+          // Check if the error suggests email verification might not be enabled
+          if (
+            verifyMsg.includes("not enabled") ||
+            verifyMsg.includes("not configured") ||
+            verifyMsg.includes("disabled") ||
+            verifyMsg.toLowerCase().includes("email verification is off")
+          ) {
+            throw new Error(
+              "Email verification is not enabled in your Appwrite console. " +
+              "Please enable it in Auth > Settings > Email verification, and configure SMTP in Settings > Email & SMS."
+            );
+          }
+          
+          // Account was created but we couldn't send verification email
+          // This indicates an Appwrite configuration issue
+          throw new Error(
+            `Account created but verification email could not be sent: ${verifyMsg}. ` +
+            "Please ensure: 1) Email verification is enabled in Auth > Settings, " +
+            "2) SMTP is configured in Settings > Email & SMS."
+          );
+        }
+      } catch (sessionErr: any) {
+        const sessionMsg = sessionErr?.message || "";
+        
+        // Check if it's our custom error about email sending failure
+        if (sessionMsg.includes("verification email could not be sent")) {
+          throw sessionErr; // Re-throw to be caught by outer catch
+        }
+        
+        // If session creation failed because email is not verified, that's expected
+        // Appwrite should have sent the verification email automatically during account creation
+        if (
+          sessionMsg.includes("not verified") ||
+          sessionMsg.includes("email verification") ||
+          sessionMsg.includes("unverified") ||
+          sessionMsg.includes("email is not confirmed")
+        ) {
+          // This is expected - Appwrite should have sent verification email automatically
+          verificationEmailSent = true;
+        } else {
+          // Other session errors - log but assume email was sent automatically
+          console.warn("Unexpected session error:", sessionMsg);
+          verificationEmailSent = true; // Assume Appwrite sent it
+        }
       }
 
-      setMessage(
-        "Account created! Please check your email (and spam folder) to verify your account before logging in."
-      );
-      
-      // Clear form after successful signup
-      setEmail("");
-      setPassword("");
-      setName("");
-      
-      // Switch to login mode after a delay
-      setTimeout(() => {
-        setMode("login");
-        setMessage(null);
-      }, 5000);
+      if (verificationEmailSent) {
+        setMessage(
+          "Account created! Please check your email (and spam folder) to verify your account before logging in."
+        );
+        
+        // Clear form after successful signup
+        setEmail("");
+        setPassword("");
+        setName("");
+        
+        // Switch to login mode after a delay
+        setTimeout(() => {
+          setMode("login");
+          setMessage(null);
+        }, 5000);
+      } else {
+        // This shouldn't happen, but handle it just in case
+        setError(
+          "Account was created but we couldn't verify if the verification email was sent. " +
+          "Please check your email or try logging in to see if verification is required."
+        );
+      }
     } catch (err: any) {
       console.error(err);
       const msg = err?.message || "";
@@ -100,6 +188,8 @@ export default function AuthPage() {
       // Check if it's an account already exists error
       if (msg.includes("already exists") || msg.includes("already registered")) {
         setError("An account with this email already exists. Please log in instead.");
+      } else if (msg.includes("verification email could not be sent")) {
+        setError(msg);
       } else {
         setError(msg || "Signup failed. Please try again.");
       }
