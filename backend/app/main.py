@@ -297,3 +297,67 @@ def get_coach_summary(
     }
 
 
+class UserRegister(BaseModel):
+    appwrite_user_id: str
+    email: str
+    name: str = ""
+
+
+@app.post("/auth/register")
+def register_user(payload: UserRegister):
+    """
+    Register a user in Supabase after email verification in Appwrite.
+    This creates a user record in Supabase that links to the Appwrite user ID.
+    """
+    try:
+        # Check if user already exists
+        existing = (
+            supabase.table("users")
+            .select("*")
+            .eq("appwrite_user_id", payload.appwrite_user_id)
+            .execute()
+        )
+        
+        if existing.data and len(existing.data) > 0:
+            return {
+                "message": "User already registered in Supabase",
+                "user_id": existing.data[0].get("id"),
+                "appwrite_user_id": payload.appwrite_user_id,
+            }
+        
+        # Insert new user
+        result = (
+            supabase.table("users")
+            .insert({
+                "appwrite_user_id": payload.appwrite_user_id,
+                "email": payload.email,
+                "name": payload.name,
+            })
+            .execute()
+        )
+        
+        if result.data and len(result.data) > 0:
+            return {
+                "message": "User registered successfully in Supabase",
+                "user_id": result.data[0].get("id"),
+                "appwrite_user_id": payload.appwrite_user_id,
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to register user in Supabase"
+            )
+    except Exception as e:
+        error_msg = str(e)
+        # If user already exists, that's okay
+        if "already exists" in error_msg.lower() or "duplicate" in error_msg.lower():
+            return {
+                "message": "User already registered",
+                "appwrite_user_id": payload.appwrite_user_id,
+            }
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error registering user: {error_msg}"
+        )
+
+

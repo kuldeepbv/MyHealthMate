@@ -160,20 +160,9 @@ export default function AuthPage() {
       }
 
       if (verificationEmailSent) {
-        setMessage(
-          "Account created! Please check your email (and spam folder) to verify your account before logging in."
-        );
-        
-        // Clear form after successful signup
-        setEmail("");
-        setPassword("");
-        setName("");
-        
-        // Switch to login mode after a delay
-        setTimeout(() => {
-          setMode("login");
-          setMessage(null);
-        }, 5000);
+        // Email was sent (either automatically by Appwrite or manually by us)
+        // Redirect to verification page to show confirmation
+        window.location.href = `/auth/verify?email=${encodeURIComponent(email)}&name=${encodeURIComponent(name || "")}`;
       } else {
         // This shouldn't happen, but handle it just in case
         setError(
