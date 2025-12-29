@@ -85,9 +85,11 @@ export default function AuthPage() {
         
         try {
           const baseUrl = window.location.origin;
+          // Appwrite will append userId and secret parameters to this URL
           const verificationUrl = `${baseUrl}/auth/verify`;
           console.log("Sending verification email to:", email, "with URL:", verificationUrl);
           
+          // Create verification - Appwrite will send email with link containing userId and secret
           await account.createVerification(verificationUrl);
           console.log("Verification email sent successfully");
           verificationEmailSent = true;

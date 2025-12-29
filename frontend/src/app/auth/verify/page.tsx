@@ -17,8 +17,16 @@ function VerifyContent() {
 
   useEffect(() => {
     const handleVerification = async () => {
-      const userId = searchParams.get("userId");
-      const secret = searchParams.get("secret");
+      // Appwrite verification links can have different parameter names
+      // Try multiple possible parameter names
+      const userId = searchParams.get("userId") || 
+                     searchParams.get("user") || 
+                     searchParams.get("userid") ||
+                     searchParams.get("id");
+      const secret = searchParams.get("secret") || 
+                     searchParams.get("hash") || 
+                     searchParams.get("token") ||
+                     searchParams.get("verification");
       const emailParam = searchParams.get("email");
 
       // Case 1: User clicked verification link from email (has userId and secret)
@@ -27,7 +35,10 @@ function VerifyContent() {
         setMessage("Verifying your email...");
 
         try {
+          console.log("Attempting verification with userId:", userId, "secret:", secret.substring(0, 10) + "...");
+          
           // Verify the email using Appwrite
+          // Note: updateVerification expects (userId, secret)
           await account.updateVerification(userId, secret);
           
           // Get user info after verification
