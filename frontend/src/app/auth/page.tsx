@@ -83,14 +83,14 @@ export default function AuthPage() {
         // In either case, we should manually send verification email to ensure user verifies
         console.log("Session created successfully - attempting to send verification email manually");
         
-        try {
-          const baseUrl = window.location.origin;
+      try {
+        const baseUrl = window.location.origin;
           // Appwrite will append userId and secret parameters to this URL
-          const verificationUrl = `${baseUrl}/auth/verify`;
+        const verificationUrl = `${baseUrl}/auth/verify`;
           console.log("Sending verification email to:", email, "with URL:", verificationUrl);
           
           // Create verification - Appwrite will send email with link containing userId and secret
-          await account.createVerification(verificationUrl);
+        await account.createVerification(verificationUrl);
           console.log("Verification email sent successfully");
           verificationEmailSent = true;
           
@@ -102,7 +102,7 @@ export default function AuthPage() {
           } catch (deleteErr: any) {
             console.warn("Failed to delete session:", deleteErr?.message);
           }
-        } catch (verifyErr: any) {
+      } catch (verifyErr: any) {
           const verifyMsg = verifyErr?.message || "";
           console.error("Failed to send verification email:", verifyMsg, verifyErr);
           
@@ -126,8 +126,8 @@ export default function AuthPage() {
               "Email verification is not enabled in your Appwrite console. " +
               "Please enable it in Auth > Settings > Email verification, and configure SMTP in Settings > Email & SMS."
             );
-          }
-          
+      }
+
           // Account was created but we couldn't send verification email
           // This indicates an Appwrite configuration issue
           throw new Error(

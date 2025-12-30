@@ -17,17 +17,19 @@ function VerifyContent() {
 
   useEffect(() => {
     const handleVerification = async () => {
-      // Appwrite verification links can have different parameter names
-      // Try multiple possible parameter names
-      const userId = searchParams.get("userId") || 
-                     searchParams.get("user") || 
-                     searchParams.get("userid") ||
-                     searchParams.get("id");
-      const secret = searchParams.get("secret") || 
-                     searchParams.get("hash") || 
-                     searchParams.get("token") ||
-                     searchParams.get("verification");
+      // Appwrite verification links use specific parameter names
+      // Appwrite sends: ?userId=xxx&secret=xxx&expires=xxx
+      const userId = searchParams.get("userId");
+      const secret = searchParams.get("secret");
       const emailParam = searchParams.get("email");
+
+      // Debug: Log all URL parameters to see what Appwrite is sending
+      const allParams: Record<string, string> = {};
+      searchParams.forEach((value, key) => {
+        allParams[key] = value;
+      });
+      console.log("All URL parameters:", allParams);
+      console.log("Full URL:", window.location.href);
 
       // Case 1: User clicked verification link from email (has userId and secret)
       if (userId && secret) {
@@ -35,28 +37,33 @@ function VerifyContent() {
         setMessage("Verifying your email...");
 
         try {
-          console.log("Attempting verification with userId:", userId, "secret:", secret.substring(0, 10) + "...");
+          console.log("Attempting verification with userId:", userId);
+          console.log("Secret length:", secret.length);
           
           // Verify the email using Appwrite
-          // Note: updateVerification expects (userId, secret)
+          // updateVerification expects (userId, secret) and does NOT require a session
           await account.updateVerification(userId, secret);
+          console.log("Email verified successfully in Appwrite");
           
-          // Get user info after verification
-          // Note: We might not have a session, so we'll use the userId and email from params
+          // IMPORTANT: Only register in Supabase AFTER successful verification
+          // Get user info after verification (may not have session, so use params as fallback)
           let userEmail = emailParam || "";
           let userName = "";
           
+          // Try to get user info, but don't fail if we can't (no session needed for verification)
           try {
+            // Try to get current user - might fail if no session
             const userInfo = await account.get();
             userEmail = userInfo.email || userEmail;
             userName = userInfo.name || "";
-          } catch (err) {
-            // If we can't get user info (no session), that's okay
-            // We'll use the userId and email from the URL params
-            console.log("Could not get user info, using params:", err);
+            console.log("Got user info:", { email: userEmail, name: userName });
+          } catch (err: any) {
+            // No session available - that's fine, we'll use URL params
+            console.log("No session available, using URL params:", err?.message);
           }
 
-          // Register user in Supabase after successful verification
+          // Register user in Supabase ONLY after successful email verification
+          console.log("Registering user in Supabase after verification...");
           try {
             const response = await fetch(`${BACKEND_URL}/auth/register`, {
               method: "POST",
@@ -72,13 +79,18 @@ function VerifyContent() {
 
             if (!response.ok) {
               const errorData = await response.json().catch(() => ({}));
-              // If user already exists in Supabase, that's okay
-              if (!errorData.detail?.includes("already exists") && 
-                  !errorData.message?.includes("already")) {
+              // If user already exists in Supabase, that's okay (might have been created earlier)
+              if (response.status === 409 || 
+                  errorData.detail?.includes("already exists") || 
+                  errorData.message?.includes("already")) {
+                console.log("User already exists in Supabase, continuing...");
+              } else {
                 console.error("Failed to register user in Supabase:", errorData);
+                // Don't fail verification if Supabase registration fails
               }
             } else {
-              console.log("User successfully registered in Supabase");
+              const data = await response.json();
+              console.log("User successfully registered in Supabase:", data);
             }
           } catch (supabaseErr) {
             console.error("Error registering user in Supabase:", supabaseErr);
@@ -87,31 +99,52 @@ function VerifyContent() {
           }
 
           setStatus("success");
-          setMessage("Email verified successfully! You can now log in.");
+          setMessage("Email verified successfully! Your account is now fully registered. You can now log in.");
           
           // Redirect to login after 3 seconds
           setTimeout(() => {
             window.location.href = "/auth";
           }, 3000);
         } catch (err: any) {
-          console.error(err);
+          console.error("Verification error:", err);
           const msg = err?.message || "";
+          console.error("Error message:", msg);
           
           if (msg.includes("already verified") || msg.includes("verified")) {
+            // Email is already verified - still register in Supabase if not done
+            try {
+              const response = await fetch(`${BACKEND_URL}/auth/register`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  appwrite_user_id: userId,
+                  email: emailParam || "",
+                  name: "",
+                }),
+              });
+              if (response.ok || response.status === 409) {
+                console.log("User registered in Supabase (already verified)");
+              }
+            } catch (supabaseErr) {
+              console.error("Error registering in Supabase:", supabaseErr);
+            }
+            
             setStatus("success");
             setMessage("Your email is already verified. You can now log in.");
             setTimeout(() => {
               window.location.href = "/auth";
             }, 3000);
-          } else if (msg.includes("expired") || msg.includes("invalid")) {
+          } else if (msg.includes("expired") || msg.includes("invalid") || msg.includes("Invalid token")) {
             setStatus("error");
             setMessage(
-              "This verification link has expired or is invalid. Please request a new verification email."
+              "This verification link has expired or is invalid. The link may have been used already, or it expired. Please request a new verification email."
             );
           } else {
             setStatus("error");
             setMessage(
-              msg || "Verification failed. Please try again or request a new verification email."
+              `Verification failed: ${msg || "Unknown error"}. Please check the link and try again, or request a new verification email.`
             );
           }
         }
