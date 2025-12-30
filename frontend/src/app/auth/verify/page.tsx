@@ -17,13 +17,15 @@ function VerifyContent() {
 
   useEffect(() => {
     const handleVerification = async () => {
-      // Appwrite verification links use specific parameter names
-      // Appwrite sends: ?userId=xxx&secret=xxx&expires=xxx
+      // Check if this is a custom verification token (from our backend)
+      const token = searchParams.get("token");
+      const emailParam = searchParams.get("email");
+      
+      // Check if this is an Appwrite verification link
       const userId = searchParams.get("userId");
       const secret = searchParams.get("secret");
-      const emailParam = searchParams.get("email");
 
-      // Debug: Log all URL parameters to see what Appwrite is sending
+      // Debug: Log all URL parameters
       const allParams: Record<string, string> = {};
       searchParams.forEach((value, key) => {
         allParams[key] = value;
@@ -31,7 +33,56 @@ function VerifyContent() {
       console.log("All URL parameters:", allParams);
       console.log("Full URL:", window.location.href);
 
-      // Case 1: User clicked verification link from email (has userId and secret)
+      // Case 1: Custom verification token (from our backend - no Appwrite account yet)
+      if (token && emailParam) {
+        setStatus("verifying");
+        setMessage("Verifying and creating your account...");
+
+        try {
+          console.log("Completing signup with token for:", emailParam);
+          
+          // Call backend to verify token and create Appwrite account
+          const response = await fetch(`${BACKEND_URL}/auth/complete-signup?token=${encodeURIComponent(token)}&email=${encodeURIComponent(emailParam)}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.detail || "Failed to complete signup");
+          }
+
+          const data = await response.json();
+          console.log("Account created successfully:", data);
+
+          setStatus("success");
+          setMessage("Email verified and account created successfully! You can now log in.");
+          
+          setTimeout(() => {
+            window.location.href = "/auth";
+          }, 3000);
+          return;
+        } catch (err: any) {
+          console.error("Signup completion error:", err);
+          const msg = err?.message || "";
+          
+          if (msg.includes("expired") || msg.includes("Invalid") || msg.includes("invalid")) {
+            setStatus("error");
+            setMessage("This verification link has expired or is invalid. Please sign up again.");
+          } else if (msg.includes("already exists")) {
+            setStatus("error");
+            setMessage("An account with this email already exists. Please log in instead.");
+          } else {
+            setStatus("error");
+            setMessage(`Verification failed: ${msg}. Please try again or sign up again.`);
+          }
+          return;
+        }
+      }
+
+      // Case 2: Appwrite verification link (userId and secret - for existing accounts)
       if (userId && secret) {
         setStatus("verifying");
         setMessage("Verifying your email...");

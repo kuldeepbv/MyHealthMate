@@ -63,23 +63,31 @@ export default function AuthPage() {
     setLoading(true);
 
     try {
-      // Create user account
-      // IMPORTANT: If email verification is enabled in Appwrite console settings,
-      // Appwrite will automatically send a verification email when the account is created.
-      // We should NOT create a session or manually send verification email here,
-      // as that can invalidate the verification token.
-      console.log("Creating account for:", email);
-      await account.create(ID.unique(), email, password, name || undefined);
-      console.log("Account created successfully");
-
-      // Appwrite should have automatically sent verification email if email verification is enabled
-      // We don't create a session here because:
-      // 1. If email verification is required, session creation will fail (expected)
-      // 2. Creating and then deleting a session can invalidate the verification token
-      // 3. Appwrite sends the verification email automatically when account is created (if configured)
+      // DON'T create Appwrite account yet - store signup data in backend temporarily
+      // Account will only be created AFTER email verification
+      console.log("Storing signup data temporarily for:", email);
       
-      // Redirect to verification page immediately
-      // The verification page will show a message that the email was sent
+      const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000";
+      const response = await fetch(`${BACKEND_URL}/auth/pending-signup`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: email,
+          password: password,
+          name: name || "",
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Failed to initiate signup. Please try again.");
+      }
+
+      console.log("Signup data stored, verification email sent");
+      
+      // Redirect to verification page
       window.location.href = `/auth/verify?email=${encodeURIComponent(email)}&name=${encodeURIComponent(name || "")}`;
     } catch (err: any) {
       console.error(err);

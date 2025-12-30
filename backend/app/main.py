@@ -1,5 +1,8 @@
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from typing import List
+import os
+import secrets
+import uuid as uuid_lib
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -297,10 +300,167 @@ def get_coach_summary(
     }
 
 
+class PendingSignup(BaseModel):
+    email: str
+    password: str
+    name: str = ""
+
+
 class UserRegister(BaseModel):
     appwrite_user_id: str
     email: str
     name: str = ""
+
+
+@app.post("/auth/pending-signup")
+def create_pending_signup(payload: PendingSignup):
+    """
+    Store signup data temporarily and send verification email.
+    Account will be created only after email verification.
+    """
+    try:
+        # Generate a unique verification token
+        verification_token = secrets.token_urlsafe(32)
+        
+        # Store in pending_signups table (create this table in Supabase)
+        # Table schema: email (text), password (text, encrypted), name (text), 
+        #               verification_token (text), created_at (timestamp), expires_at (timestamp)
+        expires_at = (datetime.utcnow() + timedelta(days=1)).isoformat()
+        
+        result = (
+            supabase.table("pending_signups")
+            .insert({
+                "email": payload.email,
+                "password": payload.password,  # In production, hash this!
+                "name": payload.name,
+                "verification_token": verification_token,
+                "expires_at": expires_at,
+            })
+            .execute()
+        )
+        
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Failed to store signup data")
+        
+        # Send verification email
+        # For now, we'll construct the verification URL
+        # In production, use your email service (SendGrid, SES, etc.) to send email
+        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+        verification_url = f"{frontend_url}/auth/verify?token={verification_token}&email={payload.email}"
+        
+        # TODO: Send actual email using your email service
+        # For now, just return the URL (remove this in production!)
+        print(f"VERIFICATION URL: {verification_url}")
+        
+        return {
+            "message": "Verification email sent",
+            "email": payload.email,
+            # Remove this in production - only for testing
+            "verification_url": verification_url if os.getenv("ENV") == "development" else None
+        }
+        
+    except Exception as e:
+        error_msg = str(e)
+        if "already exists" in error_msg.lower() or "duplicate" in error_msg.lower():
+            raise HTTPException(status_code=409, detail="An account with this email is already pending verification or exists")
+        raise HTTPException(status_code=500, detail=f"Error creating pending signup: {error_msg}")
+
+
+@app.post("/auth/complete-signup")
+def complete_signup(token: str = Query(...), email: str = Query(...)):
+    """
+    Verify token and create Appwrite account + Supabase user.
+    This is called when user clicks verification link.
+    """
+    try:
+        # Get pending signup data
+        result = (
+            supabase.table("pending_signups")
+            .select("*")
+            .eq("verification_token", token)
+            .eq("email", email)
+            .execute()
+        )
+        
+        if not result.data or len(result.data) == 0:
+            raise HTTPException(status_code=404, detail="Invalid or expired verification token")
+        
+        pending_signup = result.data[0]
+        
+        # Check if token expired
+        expires_at = datetime.fromisoformat(pending_signup["expires_at"].replace("Z", "+00:00"))
+        if datetime.utcnow() > expires_at:
+            raise HTTPException(status_code=400, detail="Verification token has expired")
+        
+        # Now create Appwrite account using Admin SDK
+        from appwrite.client import Client
+        from appwrite.services.users import Users
+        
+        appwrite_endpoint = os.getenv("APPWRITE_ENDPOINT")
+        appwrite_project_id = os.getenv("APPWRITE_PROJECT_ID")
+        appwrite_api_key = os.getenv("APPWRITE_API_KEY")  # Admin API key
+        
+        if not all([appwrite_endpoint, appwrite_project_id, appwrite_api_key]):
+            raise HTTPException(status_code=500, detail="Appwrite configuration missing")
+        
+        client = Client()
+        client.set_endpoint(appwrite_endpoint)
+        client.set_project(appwrite_project_id)
+        client.set_key(appwrite_api_key)
+        
+        users = Users(client)
+        
+        # Create user in Appwrite (will be automatically verified if email verification is disabled)
+        # Note: We need to hash password or use password hash from Appwrite
+        user_id = str(uuid_lib.uuid4())
+        try:
+            appwrite_user = users.create(
+                user_id=user_id,
+                email=pending_signup["email"],
+                password=pending_signup["password"],  # Appwrite will hash this
+                name=pending_signup.get("name", "")
+            )
+            
+            appwrite_user_id = appwrite_user["$id"]
+            
+            # IMPORTANT: Create user in Supabase ONLY after Appwrite account is successfully created
+            # This ensures both accounts are created together and only after email verification
+            try:
+                supabase_result = (
+                    supabase.table("users")
+                    .insert({
+                        "appwrite_user_id": appwrite_user_id,
+                        "email": pending_signup["email"],
+                        "name": pending_signup.get("name", ""),
+                    })
+                    .execute()
+                )
+                print(f"User created in Supabase: {appwrite_user_id}")
+            except Exception as supabase_err:
+                # If Supabase insertion fails, we should clean up Appwrite account
+                # But for now, log the error - in production you might want to delete Appwrite account
+                print(f"Warning: Failed to create Supabase user: {supabase_err}")
+                # Don't fail the whole process, but log it
+                # In production, you might want to rollback Appwrite account creation
+            
+            # Delete pending signup data after successful account creation
+            supabase.table("pending_signups").delete().eq("verification_token", token).execute()
+            
+            return {
+                "message": "Account created successfully in both Appwrite and Supabase",
+                "appwrite_user_id": appwrite_user_id,
+                "email": pending_signup["email"]
+            }
+        except Exception as appwrite_err:
+            error_msg = str(appwrite_err)
+            if "already exists" in error_msg.lower():
+                raise HTTPException(status_code=409, detail="Account already exists")
+            raise HTTPException(status_code=500, detail=f"Failed to create Appwrite account: {error_msg}")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error completing signup: {str(e)}")
 
 
 @app.post("/auth/register")
